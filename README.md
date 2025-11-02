@@ -11,6 +11,9 @@ We also provide an implementation of the refined coordinate check (RCC) from the
 
 ⚡For a complete working example, see how the monitor can be integrated into [nanoGPT](https://github.com/tml-tuebingen/nanoGPT-monitored).⚡
 
+### Who is this package for?
+
+This package is designed for researchers who prioritize monitoring specific details of neural network training over training performance. For example, we allow you to compare the activations of your network to those of a reference network, or perform the refined coordinate check, both of which are inefficient. If you're researching training dynamics or optimization theory, or want to peek into the internals of your network for debugging, this tool is for you. 
 
 ### Installation
 
