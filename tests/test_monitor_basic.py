@@ -433,3 +433,100 @@ class TestFullTrainingLoop:
         # Gradients
         assert abs(metrics["gradient/fc1.weight/norm"] - fc1_grad_norm) < 1e-5
         assert abs(metrics["gradient/fc2.weight/norm"] - fc2_grad_norm) < 1e-5
+
+
+class TestIncludedModulesRegex:
+    """Test the included_modules_regex parameter."""
+
+    def test_default_behavior_no_included_regex(self, device):
+        """Without included_modules_regex, all modules get hooks (existing behavior)."""
+        class SimpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(4, 8, bias=False)
+                self.fc2 = nn.Linear(8, 2, bias=False)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x
+
+        model = SimpleNet().to(device)
+        monitor = ModuleMonitor(monitor_step_fn=lambda step: True)
+        monitor.set_module(model)
+        monitor.add_activation_metric("mean", lambda x: x.mean())
+
+        input_data = torch.randn(2, 4, device=device)
+        monitor.begin_step(0)
+        with torch.no_grad():
+            model(input_data)
+        monitor.end_step()
+
+        metrics = monitor.get_step_metrics()
+        assert "activation/fc1/mean" in metrics
+        assert "activation/fc2/mean" in metrics
+
+    def test_included_modules_regex_limits_hooks(self, device):
+        """Only modules matching included_modules_regex get hooks."""
+        class SimpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(4, 8, bias=False)
+                self.fc2 = nn.Linear(8, 2, bias=False)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x
+
+        model = SimpleNet().to(device)
+        monitor = ModuleMonitor(
+            monitor_step_fn=lambda step: True,
+            included_modules_regex=r"fc1",
+        )
+        monitor.set_module(model)
+        monitor.add_activation_metric("mean", lambda x: x.mean())
+
+        input_data = torch.randn(2, 4, device=device)
+        monitor.begin_step(0)
+        with torch.no_grad():
+            model(input_data)
+        monitor.end_step()
+
+        metrics = monitor.get_step_metrics()
+        assert "activation/fc1/mean" in metrics
+        assert "activation/fc2/mean" not in metrics
+
+    def test_excluded_takes_precedence_over_included(self, device):
+        """A module matching both included and excluded regex is excluded."""
+        class SimpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(4, 8, bias=False)
+                self.fc2 = nn.Linear(8, 2, bias=False)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x
+
+        model = SimpleNet().to(device)
+        monitor = ModuleMonitor(
+            monitor_step_fn=lambda step: True,
+            included_modules_regex=r"fc.*",
+            excluded_modules_regex=r"fc1",
+        )
+        monitor.set_module(model)
+        monitor.add_activation_metric("mean", lambda x: x.mean())
+
+        input_data = torch.randn(2, 4, device=device)
+        monitor.begin_step(0)
+        with torch.no_grad():
+            model(input_data)
+        monitor.end_step()
+
+        metrics = monitor.get_step_metrics()
+        # fc1 matches both include and exclude -> excluded
+        assert "activation/fc1/mean" not in metrics
+        # fc2 matches include but not exclude -> included
+        assert "activation/fc2/mean" in metrics

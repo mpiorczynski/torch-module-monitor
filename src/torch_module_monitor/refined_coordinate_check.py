@@ -63,7 +63,7 @@ class RefinedCoordinateCheck:
 
         # register forward hooks on the module
         for name, module in self.monitor.module.named_modules():
-            if self.monitor._is_excluded(module):
+            if not self.monitor._is_included(module):
                 self.logger.debug(f"Module %s is excluded", name)
                 continue
 
@@ -74,7 +74,7 @@ class RefinedCoordinateCheck:
 
         # register forward hooks on the reference module
         for name, module in self.monitor.reference_module.named_modules():
-            if self.monitor._is_excluded(module, is_reference=True):
+            if not self.monitor._is_included(module, is_reference=True):
                 self.logger.debug(f"Module %s is excluded", name)
                 continue
 
@@ -109,7 +109,7 @@ class RefinedCoordinateCheck:
         comparison_modules = dict(self.reference_module.named_modules())
 
         for name, module in self.module.named_modules():
-            if self.monitor._is_excluded(module):
+            if not self.monitor._is_included(module):
                 continue
             if self.format_module_name_fn(name) == "[root module]": # exclude the root module (same result as regular reference module forward pass)
                 continue

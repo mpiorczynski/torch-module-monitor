@@ -89,18 +89,24 @@ class ModuleMonitor:
     
     """
 
-    def __init__(self, 
+    def __init__(self,
                  monitor_step_fn: Optional[Callable[[int], bool]] = lambda step: step % 20 == 0,
                  format_module_name_fn: Callable[[str], str] = default_format_module_name_fn,
                  excluded_modules_regex: str = r'$.^',
+                 included_modules_regex: Optional[str] = None,
                  logger=None,
-                 cpu_offload=False): 
+                 cpu_offload=False):
         """Init the training monitor."""
         # strategy pattern for the formatting of module names
         self.format_module_name_fn = format_module_name_fn
 
         # compile the regex for excluding modules
         self.excluded_modules_compiled_re = re.compile(excluded_modules_regex)
+
+        # compile the regex for including modules (if specified, only matching modules are monitored)
+        self.included_modules_compiled_re = (
+            re.compile(included_modules_regex) if included_modules_regex is not None else None
+        )
 
         # logging
         if logger is None:
@@ -203,12 +209,12 @@ class ModuleMonitor:
             # generate the name -> module mapping
             self.module_names[m] = self.format_module_name_fn(name)
 
-            if self._is_excluded(m):
+            if not self._is_included(m):
                 self.logger.debug(f"Module %s is excluded", name)
                 continue
 
             # register forward hooks for activation monitoring
-            hook = self._get_activation_forwad_hook(self.module_names[m]) 
+            hook = self._get_activation_forwad_hook(self.module_names[m])
             self.activation_hooks.register_forward_hook(m, hook)
             self.logger.debug(f"Registered forward hook for module %s", name)
 
@@ -241,7 +247,7 @@ class ModuleMonitor:
             # generate the name -> module mapping
             self.reference_module_names[m] = self.format_module_name_fn(name)
 
-            if self._is_excluded(m, is_reference=True):
+            if not self._is_included(m, is_reference=True):
                 self.logger.debug(f"Excluding reference module %s from monitoring.", name)
                 continue
 
@@ -476,7 +482,7 @@ class ModuleMonitor:
            In addition, this function can be used to monitor activations that are not the output of a module.
            This is what monitor_scaled_dot_product_attention does.
         """
-        if not self.is_monitoring() or self._is_excluded(module, is_reference=is_reference):
+        if not self.is_monitoring() or not self._is_included(module, is_reference=is_reference):
             return
 
         try:
@@ -687,8 +693,14 @@ class ModuleMonitor:
         return module_name
     
     
-    def _is_excluded(self, module :Union[str, torch.nn.Module], is_reference=False) -> bool:
-        """Check if a module is excluded from monitoring."""
+    def _is_included(self, module :Union[str, torch.nn.Module], is_reference=False) -> bool:
+        """Check if a module is included in monitoring."""
         module_name = self._get_module_name(module, is_reference=is_reference)
-        return self.excluded_modules_compiled_re.match(module_name) is not None
+        # explicitly excluded
+        if self.excluded_modules_compiled_re.match(module_name) is not None:
+            return False
+        # not in the inclusion list (if one is specified)
+        if self.included_modules_compiled_re is not None:
+            return self.included_modules_compiled_re.match(module_name) is not None
+        return True
     
