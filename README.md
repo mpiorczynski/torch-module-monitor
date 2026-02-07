@@ -434,6 +434,26 @@ for step, (inputs, targets) in enumerate(dataloader):
 
 For Linear and LayerNorm layers, additional bias-free metrics are logged separately for weights (e.g., `{module}.weight/l2norm`).
 
+### Activation Checkpointing
+
+When using `torch.utils.checkpoint` with `use_reentrant=False`, forward hooks fire twice per module: once during the normal forward pass and again during backward recomputation. The monitor detects this and raises a `RuntimeError`.
+
+To use the monitor with activation checkpointing, wrap the backward pass with `no_monitor()`:
+
+```python
+monitor.begin_step(step)
+
+outputs = model(inputs)
+
+with monitor.no_monitor():
+    loss = criterion(outputs, targets)
+    loss.backward()
+
+monitor.monitor_parameters()
+monitor.monitor_gradients()
+monitor.end_step()
+```
+
 ## Complex Modules
 
 By default, we monitor the activations of modules that return a single tensor. To monitor statistics of complex modules, these modules can implement `MonitorMixin`. We use this approach to monitor the internals of the attention operation. 

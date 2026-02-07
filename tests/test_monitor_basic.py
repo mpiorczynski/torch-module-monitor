@@ -530,3 +530,154 @@ class TestIncludedModulesRegex:
         assert "activation/fc1/mean" not in metrics
         # fc2 matches include but not exclude -> included
         assert "activation/fc2/mean" in metrics
+
+
+class TestDuplicateActivationDetection:
+    """Test that duplicate activation logging is detected and raises errors."""
+
+    def test_duplicate_activation_raises_runtime_error(self, device):
+        """Simulating a second forward hook firing (as with activation checkpointing)
+        should raise RuntimeError."""
+        class SimpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(4, 8, bias=False)
+                self.fc2 = nn.Linear(8, 2, bias=False)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x
+
+        model = SimpleNet().to(device)
+        monitor = ModuleMonitor(monitor_step_fn=lambda step: True)
+        monitor.set_module(model)
+        monitor.add_activation_metric("mean", lambda x: x.mean())
+
+        input_data = torch.randn(2, 4, device=device)
+
+        monitor.begin_step(0)
+        with torch.no_grad():
+            model(input_data)  # first forward pass — hooks fire normally
+
+        # Simulate a second hook firing (as happens during backward with checkpointing)
+        with pytest.raises(RuntimeError, match="already been logged in this micro-batch"):
+            monitor.monitor_activations("fc1", torch.randn(2, 8, device=device))
+
+    def test_no_monitor_suppresses_duplicate_error(self, device):
+        """Wrapping a second forward pass in no_monitor() should prevent the duplicate error."""
+        class SimpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(4, 8, bias=False)
+                self.fc2 = nn.Linear(8, 2, bias=False)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x
+
+        model = SimpleNet().to(device)
+        monitor = ModuleMonitor(monitor_step_fn=lambda step: True)
+        monitor.set_module(model)
+        monitor.add_activation_metric("mean", lambda x: x.mean())
+
+        input_data = torch.randn(2, 4, device=device)
+
+        monitor.begin_step(0)
+        with torch.no_grad():
+            model(input_data)  # first forward pass — hooks fire normally
+
+        # Second forward pass wrapped in no_monitor() — should not raise
+        with monitor.no_monitor():
+            with torch.no_grad():
+                model(input_data)  # hooks are suppressed
+
+        monitor.end_step()
+
+    def test_after_micro_batch_resets_duplicate_tracking(self, device):
+        """after_micro_batch() should clear duplicate tracking, allowing another forward pass."""
+        class SimpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(4, 8, bias=False)
+
+            def forward(self, x):
+                return self.fc1(x)
+
+        model = SimpleNet().to(device)
+        monitor = ModuleMonitor(monitor_step_fn=lambda step: True)
+        monitor.set_module(model)
+        monitor.add_activation_metric("mean", lambda x: x.mean())
+
+        input_data = torch.randn(2, 4, device=device)
+
+        monitor.begin_step(0)
+        with torch.no_grad():
+            model(input_data)  # first micro-batch
+
+        monitor.after_micro_batch()
+
+        # Second micro-batch should work fine (tracking was reset)
+        with torch.no_grad():
+            model(input_data)
+
+        monitor.end_step()
+
+    def test_end_step_resets_duplicate_tracking(self, device):
+        """end_step() should clear duplicate tracking for the next step."""
+        class SimpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(4, 8, bias=False)
+
+            def forward(self, x):
+                return self.fc1(x)
+
+        model = SimpleNet().to(device)
+        monitor = ModuleMonitor(monitor_step_fn=lambda step: True)
+        monitor.set_module(model)
+        monitor.add_activation_metric("mean", lambda x: x.mean())
+
+        input_data = torch.randn(2, 4, device=device)
+
+        # Step 0
+        monitor.begin_step(0)
+        with torch.no_grad():
+            model(input_data)
+        monitor.end_step()
+
+        # Step 1 should work fine (tracking was reset by end_step)
+        monitor.begin_step(1)
+        with torch.no_grad():
+            model(input_data)
+        monitor.end_step()
+
+    def test_reference_module_duplicate_raises_runtime_error(self, device):
+        """Duplicate reference module activations should raise RuntimeError."""
+        class SimpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(4, 8, bias=False)
+
+            def forward(self, x):
+                return self.fc1(x)
+
+        model = SimpleNet().to(device)
+        ref_model = SimpleNet().to(device)
+
+        monitor = ModuleMonitor(monitor_step_fn=lambda step: True)
+        monitor.set_module(model)
+        monitor.set_reference_module(ref_model)
+        monitor.add_activation_metric("mean", lambda x: x.mean())
+
+        input_data = torch.randn(2, 4, device=device)
+
+        monitor.begin_step(0)
+        with torch.no_grad():
+            ref_model(input_data)  # first reference forward pass
+
+        # Simulate a second reference hook firing
+        with pytest.raises(RuntimeError, match="already been stored in this micro-batch"):
+            with torch.no_grad():
+                ref_model(input_data)

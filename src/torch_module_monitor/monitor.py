@@ -143,6 +143,9 @@ class ModuleMonitor:
         self.activation_hooks = HooksManager()
         self.reference_activation_hooks = HooksManager()
 
+        # track which modules have already logged activations in the current micro-batch
+        self._activated_modules_in_microbatch = set()
+
         # the storage object where we store the logged metrics
         self.storage = StorageManager(self.logger)
 
@@ -357,6 +360,7 @@ class ModuleMonitor:
         the next micro-batch forward pass.
         """
         self.reference_module_activations = {}
+        self._activated_modules_in_microbatch = set()
 
 
     def end_step(self):
@@ -367,6 +371,7 @@ class ModuleMonitor:
         """
         # we don't require the user to call after_micro_batch if there is only a single micro batch
         self.reference_module_activations = {}
+        self._activated_modules_in_microbatch = set()
 
         if self.is_monitoring():
             self.storage.aggregate_step(self.current_step)
@@ -507,7 +512,11 @@ class ModuleMonitor:
                     return
                 # raise an error if the reference module has already stored activations for this module
                 if module_name in self.reference_module_activations:
-                    raise ValueError(f"Step {self.current_step}: Activations of the reference module for module %s are already stored.", module_name)
+                    raise RuntimeError(
+                        f"Activations for reference module '{module_name}' have already been stored in this micro-batch. "
+                        f"This can happen when using activation checkpointing (torch.utils.checkpoint). "
+                        f"Wrap the backward pass with `monitor.no_monitor()` to suppress hooks during recomputation."
+                    )
                 # optionally, offload the activations to the CPU. this is extremely expensive but can save GPU memory.
                 if self.cpu_offload:
                     activations = activations.cpu()
@@ -517,6 +526,15 @@ class ModuleMonitor:
                 self.logger.debug(f"Step {self.current_step}: Stored activations of reference module %s with shape %s", module_name, activations.shape)
                 return
 
+            # check for duplicate activations (e.g., from activation checkpointing)
+            if module_name in self._activated_modules_in_microbatch:
+                raise RuntimeError(
+                    f"Activations for module '{module_name}' have already been logged in this micro-batch. "
+                    f"This can happen when using activation checkpointing (torch.utils.checkpoint). "
+                    f"Wrap the backward pass with `monitor.no_monitor()` to suppress hooks during recomputation."
+                )
+            self._activated_modules_in_microbatch.add(module_name)
+
             # activation metrics
             for metric_name, (compiled_re, metric_fn, metric_aggregation_fn) in self.activation_metrics.items():
                 if compiled_re.match(module_name):
@@ -525,7 +543,7 @@ class ModuleMonitor:
                                                     metric_fn,
                                                     metric_aggregation_fn,
                                                     activations)
-                    
+
             self.logger.debug(f"Step {self.current_step}: Monitored activations of module %s with shape %s", module_name, activations.shape)
 
             # activation difference metrics
@@ -547,6 +565,8 @@ class ModuleMonitor:
                             self.logger.warning(f"Step {self.current_step}: No reference module activations found for module %s", module_name)
 
                 self.logger.debug(f"Step {self.current_step}: Monitored activation differences of module %s with shape %s", module_name, activations.shape)
+        except RuntimeError:
+            raise
         except Exception as e:
             raise RuntimeError(f"Failed to monitor activations of module {module_name}.") from e
 

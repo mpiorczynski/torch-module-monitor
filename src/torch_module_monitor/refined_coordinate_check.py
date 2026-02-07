@@ -276,6 +276,14 @@ class RefinedCoordinateCheck:
                 input = (i.cpu() if isinstance(i, torch.Tensor) else i for i in input)
                 output = output.cpu()
 
+            # check for duplicate inputs (e.g., from activation checkpointing)
+            if module_name in self.module_inputs:
+                raise RuntimeError(
+                    f"RCC: Inputs for module '{module_name}' have already been captured in this micro-batch. "
+                    f"This can happen when using activation checkpointing (torch.utils.checkpoint). "
+                    f"Wrap the backward pass with `monitor.no_monitor()` to suppress hooks during recomputation."
+                )
+
             # store the input and output
             self.module_inputs[module_name] = input
             self.module_outputs[module_name] = output
@@ -298,6 +306,14 @@ class RefinedCoordinateCheck:
             # move the input and output to the CPU if cpu_offload is set
             if self.cpu_offload:
                 input = (i.cpu() if isinstance(i, torch.Tensor) else i for i in input)
+
+            # check for duplicate inputs (e.g., from activation checkpointing)
+            if module_name in self.reference_module_inputs:
+                raise RuntimeError(
+                    f"RCC: Inputs for reference module '{module_name}' have already been captured in this micro-batch. "
+                    f"This can happen when using activation checkpointing (torch.utils.checkpoint). "
+                    f"Wrap the backward pass with `monitor.no_monitor()` to suppress hooks during recomputation."
+                )
 
             # store the input and output
             self.reference_module_inputs[module_name] = input
