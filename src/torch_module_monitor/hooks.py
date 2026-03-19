@@ -13,18 +13,20 @@ class HooksManager:
 
     def register_forward_hook(self,
                               module: nn.Module,
-                              hook_fn: Callable) -> None:
+                              hook_fn: Callable,
+                              with_kwargs: bool = False) -> None:
         """Register a forward hook on the specified module.
 
         Args:
             module: The module to register the hook on.
-            hook_fn: The hook function to register (signature: fn(module, input, output)).
+            hook_fn: The hook function to register (signature: fn(module, input, output) or fn(module, args, kwargs, output) if with_kwargs=True).
+            with_kwargs: If True, the hook receives kwargs as well.
         """
         # Remove existing hook if present
         if module in self.hooks:
             self.hooks[module].remove()
-            
-        handle = module.register_forward_hook(hook_fn)
+
+        handle = module.register_forward_hook(hook_fn, with_kwargs=with_kwargs)
         self.hooks[module] = handle
     
     def remove_hook(self, module: nn.Module) -> None:
