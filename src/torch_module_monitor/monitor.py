@@ -10,7 +10,8 @@ from contextlib import contextmanager
 import re
 
 from .hooks import HooksManager
-from .storage import StorageManager    
+from .storage import StorageManager
+from .utils import extract_activation_tensor
 
 
 ############################################################################################
@@ -573,13 +574,13 @@ class ModuleMonitor:
 
     def _get_activation_forwad_hook(self, module_name : str):
         def hook(module, input, output):
-            self.monitor_activations(module_name, output, is_reference=False)
+            self.monitor_activations(module_name, extract_activation_tensor(output), is_reference=False)
         return hook
-    
+
 
     def _get_reference_activation_forward_hook(self):
         def hook(module, input, output):
-            self.monitor_activations(module, output, is_reference=True)
+            self.monitor_activations(module, extract_activation_tensor(output), is_reference=True)
         return hook
 
 

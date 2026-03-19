@@ -5,7 +5,9 @@ import torch
 from typing import Union, List, Tuple, Any
 
 from .hooks import HooksManager
-from .monitor import ModuleMonitor  
+from .monitor import ModuleMonitor
+from .utils import extract_activation_tensor
+
 
 def l2_norm(tensor: torch.Tensor) -> torch.Tensor:
     """Compute L2 norm along the last dimension.
@@ -176,7 +178,7 @@ class RefinedCoordinateCheck:
         with torch.no_grad():
             # perform a forward pass in the reference module, using the intermediate input from the monitored module (W_0 x_t)
             self.monitor.ignore_reference_module_activations = True      # temporarily ignore reference module activation hooks (this is important! we do not want to overwrite the reference module activations)
-            W0_xt = W0_module(*Wt_input).detach().clone()
+            W0_xt = extract_activation_tensor(W0_module(*Wt_input)).detach().clone()
             self.monitor.ignore_reference_module_activations = False
 
             # for modules that have a .bias attribute, additionally compute the metrics without the bias
@@ -265,6 +267,11 @@ class RefinedCoordinateCheck:
         """Create a forward hook for the monitored module to capture inputs/outputs."""
         def hook(module, input, output):
             if not self.monitor.is_monitoring():
+                return
+
+            # extract the activation tensor from tuple outputs
+            output = extract_activation_tensor(output)
+            if not isinstance(output, torch.Tensor):
                 return
 
             # detach input and output from the computational graph
