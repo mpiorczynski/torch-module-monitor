@@ -20,6 +20,17 @@ def l2_norm(tensor: torch.Tensor) -> torch.Tensor:
     """
     return torch.linalg.vector_norm(tensor, ord=2, dim=-1)
 
+def rms_norm(tensor: torch.Tensor) -> torch.Tensor:
+    """Compute RMS norm along the last dimension.
+
+    Args:
+        tensor: Input tensor of any shape.
+
+    Returns:
+        Tensor with shape tensor.shape[:-1] containing RMS norms.
+    """
+    return torch.sqrt(torch.mean(tensor ** 2, dim=-1))
+
 class RefinedCoordinateCheck:
     """Performs the refined coordinate check (RCC) from https://arxiv.org/abs/2505.22491.
 
@@ -213,73 +224,145 @@ class RefinedCoordinateCheck:
                         W0_x0_nobias, W0_xt_nobias, Wt_xt_nobias = None, None, None
 
         if isinstance(Wt_module, torch.nn.Embedding):      # special handling for embedding layers: we only compute (W_t-W_0) x_t
-            result = l2_norm(Wt_xt - W0_xt)
-            log_entry = f"RCC (W_t-W_0)x_t/{module_name}/l2norm"
-            self.monitor.log_tensor(log_entry, result)
+            log_entry = f"RCC (W_t-W_0)x_t/{module_name}"
+            self.monitor.log_tensor(
+                f"{log_entry}/l2norm",
+                l2_norm(Wt_xt - W0_xt)
+            )
+            self.monitor.log_tensor(
+                f"{log_entry}/rmsnorm",
+                rms_norm(Wt_xt - W0_xt)
+            )
+
             return
 
         # Frobenious norm of (W_t-W_0) x_t
-        result = l2_norm(Wt_xt - W0_xt)
-        log_entry = f"RCC (W_t-W_0)x_t/{module_name}/l2norm"
-        self.monitor.log_tensor(log_entry, result)
+        log_entry = f"RCC (W_t-W_0)x_t/{module_name}"
+        self.monitor.log_tensor(
+            f"{log_entry}/l2norm", 
+            l2_norm(Wt_xt - W0_xt)
+        )
+        self.monitor.log_tensor(
+            f"{log_entry}/rmsnorm", 
+            rms_norm(Wt_xt - W0_xt)
+        )
 
         # Frobenious norm of W_0 (x_t-x_0)
-        result = l2_norm(W0_xt - W0_x0)
-        log_entry = f"RCC W_0(x_t-x_0)/{module_name}/l2norm"
-        self.monitor.log_tensor(log_entry, result)
+        log_entry = f"RCC W_0(x_t-x_0)/{module_name}"
+        self.monitor.log_tensor(
+            f"{log_entry}/l2norm",
+            l2_norm(W0_xt - W0_x0)
+        )
+        self.monitor.log_tensor(
+            f"{log_entry}/rmsnorm",
+            rms_norm(W0_xt - W0_x0)
+        )
 
         # norm of x_t
         xt = self._get_first_tensor_input(Wt_args, Wt_kwargs)
         if xt is not None:
             self.logger.debug(f"Step {self.monitor.current_step}: Refined coordinate check: Input to module {module_name} is a tensor with shape {xt.shape}")
-            result = l2_norm(xt)
-            log_entry = f"RCC x_t/{module_name}/l2norm"
-            self.monitor.log_tensor(log_entry, result)
+            log_entry = f"RCC x_t/{module_name}"
+            self.monitor.log_tensor(
+                f"{log_entry}/l2norm",
+                l2_norm(xt)
+            )
+            self.monitor.log_tensor(
+                f"{log_entry}/rmsnorm",
+                rms_norm(xt)
+            )
+
         else:
             self.logger.debug(f"Step {self.monitor.current_step}: Refined coordinate check: No tensor input found for module {module_name}")
 
         # norm of x_t - x_0
         x0 = self._get_first_tensor_input(W0_args, W0_kwargs)
         if x0 is not None and xt is not None:
-            result = l2_norm(xt - x0)
-            log_entry = f"RCC (x_t-x_0)/{module_name}/l2norm"
-            self.monitor.log_tensor(log_entry, result)
+            log_entry = f"RCC (x_t-x_0)/{module_name}"
+            self.monitor.log_tensor(
+                f"{log_entry}/l2norm",
+                l2_norm(xt - x0)
+            )
+            self.monitor.log_tensor(
+                f"{log_entry}/rmsnorm",
+                rms_norm(xt - x0)
+            )
         else:
             self.logger.debug(f"Step {self.monitor.current_step}: Refined coordinate check: No tensor input found for module {module_name}")
 
         # for linear layers and layer norm layers, the terms without the bias provide to the coordinate check for the weight
         if isinstance(Wt_module, torch.nn.Linear) or isinstance(Wt_module, torch.nn.LayerNorm):
-            result = l2_norm(Wt_xt_nobias - W0_xt_nobias)       # Bias free Frobenious norm of (W_t-W_0) x_t
-            log_entry = f"RCC (W_t-W_0)x_t/{module_name}.weight/l2norm"
-            self.monitor.log_tensor(log_entry, result)
+            # Bias free Frobenious norm of (W_t-W_0) x_t
+            log_entry = f"RCC (W_t-W_0)x_t/{module_name}.weight"
+            self.monitor.log_tensor(
+                f"{log_entry}/l2norm", 
+                l2_norm(Wt_xt_nobias - W0_xt_nobias)
+            )
+            self.monitor.log_tensor(
+                f"{log_entry}/rmsnorm", 
+                rms_norm(Wt_xt_nobias - W0_xt_nobias)
+            )
 
-            result = l2_norm(W0_xt_nobias - W0_x0_nobias)       # Bias free Frobenious norm of W_0 (x_t-x_0)
-            log_entry = f"RCC W_0(x_t-x_0)/{module_name}.weight/l2norm"
-            self.monitor.log_tensor(log_entry, result)
+            # Bias free Frobenious norm of W_0 (x_t-x_0)
+            log_entry = f"RCC W_0(x_t-x_0)/{module_name}.weight"
+            self.monitor.log_tensor(
+                f"{log_entry}/l2norm",
+                l2_norm(W0_xt_nobias - W0_x0_nobias)
+            )
+            self.monitor.log_tensor(
+                f"{log_entry}/rmsnorm",
+                rms_norm(W0_xt_nobias - W0_x0_nobias)
+            )
 
-            result = l2_norm(Wt_xt_nobias)                      # bias free norm of Wt_xt
-            log_entry = f"RCC (W_t-W_0)x_t/{module_name}.weight/W_t x_t/l2norm"
-            self.monitor.log_tensor(log_entry, result)
+            # bias free norm of Wt_xt
+            log_entry = f"RCC (W_t-W_0)x_t/{module_name}.weight/W_t x_t"
+            self.monitor.log_tensor(
+                f"{log_entry}/l2norm",
+                l2_norm(Wt_xt_nobias)                      
+            )
+            self.monitor.log_tensor(
+                f"{log_entry}/rmsnorm",
+                rms_norm(Wt_xt_nobias)                      
+            )
 
-            result = l2_norm(W0_x0_nobias)                      # bias free norm of W0_x0
-            log_entry = f"RCC W_0(x_t-x_0)/{module_name}.weight/W_0 x_0/l2norm"
-            self.monitor.log_tensor(log_entry, result)
+            # bias free norm of W0_x0
+            log_entry = f"RCC W_0(x_t-x_0)/{module_name}.weight/W_0 x_0"
+            self.monitor.log_tensor(
+                f"{log_entry}/l2norm",
+                l2_norm(W0_x0_nobias)                      
+            )
+            self.monitor.log_tensor(
+                f"{log_entry}/rmsnorm",
+                rms_norm(W0_x0_nobias)                      
+            )
 
         # for layer norm, additionally log x-E(x)/Var(x) as input to the weights
         if isinstance(Wt_module, torch.nn.LayerNorm):
             xt_ln = self._get_first_tensor_input(Wt_args, Wt_kwargs)
             if xt_ln is not None:
                 xt_ln = torch.nn.functional.layer_norm(xt_ln, Wt_module.normalized_shape, None, None, Wt_module.eps)
-                result = l2_norm(xt_ln)
-                log_entry = f"RCC (W_t-W_0)x_t/{module_name}.weight/x_t/l2norm"
-                self.monitor.log_tensor(log_entry, result)
+                log_entry = f"RCC (W_t-W_0)x_t/{module_name}.weight/x_t"
+                self.monitor.log_tensor(
+                    f"{log_entry}/l2norm",
+                    l2_norm(xt_ln)
+                )
+                self.monitor.log_tensor(
+                    f"{log_entry}/rmsnorm",
+                    rms_norm(xt_ln)
+                )
 
             x0_ln = self._get_first_tensor_input(W0_args, W0_kwargs)
             if x0_ln is not None and xt_ln is not None:
                 x0_ln = torch.nn.functional.layer_norm(x0_ln, W0_module.normalized_shape, None, None, W0_module.eps)
-                result = l2_norm(xt_ln - x0_ln)
-                log_entry = f"RCC W_0(x_t-x_0)/{module_name}.weight/x_t-x_0/l2norm"
-                self.monitor.log_tensor(log_entry, result)
+                log_entry = f"RCC W_0(x_t-x_0)/{module_name}.weight/x_t-x_0"
+                self.monitor.log_tensor(
+                    f"{log_entry}/l2norm",
+                    l2_norm(xt_ln - x0_ln)
+                )
+                self.monitor.log_tensor(
+                    f"{log_entry}/rmsnorm",
+                    rms_norm(xt_ln - x0_ln)
+                )
 
 
     def _get_rcc_forward_hook(self, module_name: str):
