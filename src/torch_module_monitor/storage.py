@@ -46,13 +46,15 @@ class StorageManager:
         """Clear the log dict."""
         self.log_dict = {}
         
-    def log_scalar(self, step: int, key: str, value: Union[Number, torch.Tensor], aggregation_fn: Callable | None = None):
+    def log_scalar(self, step: int, key: str, value: Union[Number, torch.Tensor], force: bool = False, aggregation_fn: Callable | None = None):
         """Log a scalar value.
         
         If the same key is logged multiple times in a step, values are stored in a list.
         """
         # Ensure step exists
         if step not in self.log_dict:
+            if not force:
+                return
             self.log_dict[step] = {}
             
         # Convert tensor to scalar if needed
